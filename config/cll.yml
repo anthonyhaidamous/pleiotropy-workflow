@@ -1,0 +1,246 @@
+# =============================================================================
+# Phenotype configuration: cll
+# Every pipeline stage reads from this file. To run for another phenotype,
+# copy this file (e.g. config/cll.yml) and edit the values below.
+# =============================================================================
+
+phenotype:
+  name: "chronic lymphocytic leukemia"
+  # MAPPED_TRAIT terms in the GWAS Catalog that define the phenotype of interest.
+  # Used in Stage 1 to identify lead SNPs and in Stage 5/7 to remove self-trait.
+  trait_terms:
+    - "chronic lymphocytic leukemia"
+
+paths:
+  # Inputs (shared across phenotypes)
+  studies:       "data/studies/gwas-catalog-v1.0.3.1-studies-r2026-02-16.tsv"
+  associations:  "data/associations/gwas-catalog-download-associations-alt-full.tsv"
+  # Records the reference used by the original CLL run. That file is NOT
+  # distributed with the repo (see README → Data), so on a fresh clone stage 7
+  # finds nothing here and flags every trait `new` for your own review — which
+  # is the intended first-run behaviour. Remove or set null for a new phenotype.
+  trait_ref:     "data/trait_ref/cll/07_trait_table_reviewed.txt"
+
+  # Output bases. The pipeline appends the phenotype slug automatically,
+  # so the actual locations end up as:
+  #   results/intermediate/leptin/
+  #   results/review/leptin/
+  #   figures/leptin/
+  # Run any other phenotype with the same project; its outputs land in
+  # parallel directories without colliding.
+  intermediate:  "results/intermediate"
+  review:        "results/review"
+  figures:       "figures"
+
+filters:
+  pvalue:           5.0e-8
+  ld_block_r2:      0.1     # SNPs kept in LD block construction (lead + proxies + correlated)
+  ld_proxy_r2:      0.9     # SNPs treated as proxies (pSNPs)
+  min_sample_size:  1000    # initial + replication, applied at cross-trait filtering
+
+ensembl:
+  build: "GRCh38"   # one of: GRCh38, GRCh37
+
+# -----------------------------------------------------------------------------
+# Ancestry encoding follows the cohort-proportion rule:
+#   - parse INITIAL SAMPLE SIZE and REPLICATION SAMPLE SIZE separately
+#   - if one superpop is >=90% of a field, that field emits just that superpop
+#   - otherwise, emit all superpops present in the field
+#   - union the two fields' results
+#
+# Descriptor -> superpop mapping is hardcoded in R/utils.r
+# (.ancestry_descriptor_map). Edit it there if you need to add or reassign
+# population descriptors.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Block merges — filled in AFTER Stage 4 produces its overlap report.
+# Each entry is a list of block names that should be merged into one.
+# Leave as [] on first run, then update and re-run Stage 4.
+# -----------------------------------------------------------------------------
+block_merges:
+  - ["B3", "B4"]
+  - ["B22", "B23", "B24"]
+  - ["B25", "B26"]
+  - ["B31", "B32", "B33"]
+  - ["B40", "B41", "B42"]
+  - ["B43", "B44"]
+  - ["B53", "B54"]
+  - ["B57", "B58"]
+
+# -----------------------------------------------------------------------------
+# GxE / multi-trait exclusion regex (Stage 6)
+# Defaults live in R/utils.r; override here if you need phenotype-specific tweaks.
+# Set use_defaults: true to use the built-in patterns unchanged.
+# -----------------------------------------------------------------------------
+gxe_exclusions:
+  use_defaults: true
+  # extra_patterns:       # optional list of additional regex to auto-exclude
+  #   - "\\bsome_pattern\\b"
+
+  # ---- Composite-ratio rule: explicit exceptions --------------------------
+  # See config/leptin.yml for the full rationale. Methods statement:
+  #   Ratios of two separately-ascertained biomarkers or anatomical
+  #   compartments were excluded; established composite anthropometric indices
+  #   treated as unitary phenotypes in the literature were retained.
+  #
+  # Deliberately NOT retained here:
+  #   "Head width to hip width ratio" (GCST90702455, 1 association,
+  #   N = 38,202) — not an established index.
+  # See config/leptin.yml for the full rationale. ABSI / Hip Index are
+  # published allometric indices; the catalog's "BMI-adjusted …" label is an
+  # EFO relabelling of them. Matching is exact on the whole string.
+  ratio_keep_list:
+    - "waist-hip ratio"
+    - "BMI-adjusted waist-hip ratio"
+    - "BMI-adjusted waist circumference"
+    - "BMI-adjusted hip circumference"
+
+  # ---- Composite-multitrait rule: explicit exceptions ---------------------
+  # See config/leptin.yml and .context/decisions.md C6, C7 for the rationale.
+  # These are appositions — the second fragment renames the first rather than
+  # adding a phenotype — not enumerations of distinct phenotypes.
+  multitrait_keep_list:
+    # REVERSAL (2026-08-03): "brain volume, neuroimaging measurement" was on
+    # this list as an apposition. Its source is "Subcortical volume (MOSTest)"
+    # -- MOSTest is a multivariate omnibus test across subcortical volumes, so
+    # the effect is not attributable to any single phenotype. It is genuinely
+    # multi-trait; the fail-closed classifier was right and the apposition
+    # ruling was wrong. Removed. See .context/decisions.md D7.
+    #
+    # the CSF composition attribute IS the deoxyuridine measurement
+    - "cerebrospinal fluid composition attribute, 2'-deoxyuridine measurement"
+    # telomere length: a real phenotype and a known prognostic marker in CLL,
+    # so on-target rather than noise. Carries 20 associations, not 1 — the
+    # largest single entry on either keep-list.
+    - "chromosome, telomeric region length"
+
+# -----------------------------------------------------------------------------
+# Self-trait exclusions (Stage 7)
+# Categories with these names will be removed before enrichment.
+# -----------------------------------------------------------------------------
+self_trait_categories:
+  - "CLL"
+
+# =============================================================================
+# STRING network stage group (pipeline/string_pipeline/)
+#
+# Parameters are DELIBERATELY IDENTICAL to config/leptin.yml. This phenotype
+# exists here as leptin's comparator: if the score threshold, the inflation or
+# the artifact fraction differed, any difference between the two networks would
+# be confounded with the settings and the comparison would say nothing.
+# Change one here and you must change it there.
+# =============================================================================
+string:
+
+  # ---- Version pin. Recorded in provenance and in every output filename. ----
+  version:       "12.0"        # STRING release; "12.0" -> "v12-0" in filenames
+  species_taxon: 9606          # NCBI taxonomy id
+  network_type:  "functional"  # functional | physical
+
+  # ---- Dataset definition, NOT a display setting. ----
+  # No default exists in code: stage 01 aborts if this key is absent.
+  # 400 = 40% estimated probability that the association is real.
+  score_threshold: 400
+
+  # ---- Version-pinned bulk source (never the REST API: no rate limits, no
+  #      version drift, and the source file itself can be archived). ----
+  bulk:
+    dir: "data/string/bulk"
+    # Leave null to derive the version-stable host from the pin:
+    #   https://version-12-0.string-db.org/download
+    # That address is what string-db.org's own version API advertises, and it
+    # keeps serving v12.0 after the project ships v13. A host that tracks the
+    # current release would quietly break the pin.
+    source_url_base: null
+    # Tried in order if the primary host fails. Which host answered does not
+    # change the file (the manifest records each md5), and the manifest records
+    # which URL was used.
+    fallback_url_bases:
+      - "https://string-db.org/download"
+      # cert on this host expired 2026-07-29; kept last as a historical mirror
+      - "https://stringdb-downloads.org/download"
+    download_timeout: 3600     # seconds; the links file is ~250 MB
+    verify_live_version: true  # compare pin against the live release (warn only)
+    version_api: "https://string-db.org/api/json/version"
+
+  # ---- Input: protein-coding genes from the LD blocks (stage 10 output).
+  #      A bare filename resolves under results/intermediate/<slug>/. ----
+  input:
+    # Stage 10's SUBMISSION list, not its complete gene list. The two differ by
+    # the genes that are real and counted but are not valid STRING input —
+    # bare Ensembl IDs with no resolved symbol (1 in leptin, 8 in CLL). Those
+    # stay in genes_list_complete.txt and in the gene table, and are named in
+    # genes_excluded_from_string.tsv for the supplement.
+    gene_list: "genes_string_submission.txt"
+    # Stage 10's per-block gene table. Supplies each gene's LD block of origin,
+    # which becomes a vertex attribute and drives the block x module overlay.
+    # Set to null to build the graph without block annotation.
+    block_table: "protein_coding_genes_by_block.tsv"
+    block_gene_col:  "external_gene_name"
+    block_block_col: "Block"
+    # CLL has 49 LD blocks against leptin's 15, so two of them are close enough
+    # for a single long gene to sit in both once the +/-10 kb extraction padding
+    # is applied. Two genes are affected and neither is a merge error:
+    #   ACOXL  386 kb, spans B3 and B4 (2.5 kb apart)
+    #   LPP    738 kb, CONTAINS B11 and B12 (158 kb apart) — two independent
+    #          association signals inside one gene body
+    # Assign each to the block its body overlaps most; ties go to the lowest
+    # block number so the result cannot depend on row order. Both assignments
+    # are printed by stage 02 and land in string_02_accounting.tsv.
+    # Leptin leaves this key unset and keeps the hard error.
+    multi_block_policy: "largest_overlap"
+
+  # ---- Output ----
+  output:
+    edges_dir:    "data/string"      # frozen network bundle (note: data/ is gitignored)
+    stage_subdir: "string_modules"   # under results/intermediate/<slug>/
+
+  # ---- Reader tuning (memory, not analysis) ----
+  read:
+    chunk_size: 1000000        # rows per chunk when scanning the links file
+
+  # ---- Stage 02: which node set flows downstream ----
+  components:
+    downstream_node_set: "lcc"   # lcc | degree_ge1
+
+  # ---- Stage 03: module detection ----
+  # MCL is deterministic (no RNG), assumes no number of clusters, and partitions
+  # by density rather than by path. Uses van Dongen's reference implementation,
+  # not the CRAN MCL package.
+  mcl:
+    binary: "mcl"
+    inflation: 1.5        # matches the earlier manual run; stage 04 sweeps it
+    weight_scale: 1000    # combined_score / this -> edge weight in [0, 1]
+    extra_args: []
+
+  # ---- Positional-artifact rule, fixed in advance (method notes, H3) ----
+  # Any module with more than this fraction of members from a single LD block is
+  # reported as a positional artifact and excluded from downstream hypotheses.
+  # Set before looking at the numbers, on purpose.
+  modules:
+    max_single_block_fraction: 0.60
+
+  # ---- Stage 04: is the partition above an artifact of its two parameters? ----
+  # Stage 04 re-clusters the identical frozen graph across the grid and reports
+  # every stage-03 module's fate. It defines no dataset and overwrites nothing
+  # stage 03 owns, but the grid does define the coverage of the robustness
+  # claim, so it is declared here rather than defaulted in code.
+  stability:
+    # 1.2 is kept deliberately even though it collapses this graph to a single
+    # cluster: a degenerate endpoint is a result, and the stage names it and
+    # excludes it from the consensus rather than letting it lift every pair.
+    # Above ~4.0 the graph shatters into singletons. The reference inflation
+    # (mcl.inflation) is always swept whether or not it appears here.
+    inflation_grid: [1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0]
+    # Artifact thresholds to report each module's verdict at. 0.60 is the
+    # configured rule; the neighbours are here because M4 clears it at 57.1%,
+    # i.e. by one gene, and a threshold doing arbitrary work should be visible
+    # in the output rather than found by a reviewer.
+    artifact_fractions: [0.55, 0.60, 0.65]
+    # Consensus levels for the stable-core decomposition. Within a module, gene
+    # pairs co-clustered in at least this fraction of the informative grid runs
+    # are linked, and the connected components are its cores. Every level is
+    # reported, so the level's influence is visible rather than chosen.
+    core_consensus_levels: [0.5, 0.6, 0.7, 0.8]
+    sweep_subdir: "string_04_sweep"   # raw mcl output, one file per inflation

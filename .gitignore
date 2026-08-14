@@ -1,0 +1,58 @@
+# ── Editor / tooling local state ─────────────────────────────────────────────
+.claude/settings.local.json
+.vscode/
+.idea/
+
+# ── R session cruft ──────────────────────────────────────────────────────────
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+.DS_Store
+Thumbs.db
+
+# ── renv ─────────────────────────────────────────────────────────────────────
+# The lockfile (renv.lock) and the activation shim (renv/activate.R) ARE
+# tracked — they are what makes the environment reproducible. The installed
+# library is machine- and OS-specific and is not.
+renv/library/
+renv/local/
+renv/cellar/
+renv/lock/
+renv/python/
+renv/sandbox/
+renv/staging/
+
+# ── Input data ───────────────────────────────────────────────────────────────
+# GWAS Catalog releases are large and versioned by date; each user downloads
+# the release they want (see README → Data). The chromosome sizes table is
+# small and fixed, so it is tracked.
+data/*
+!data/.gitkeep
+!data/chromosomes/
+data/chromosomes/*
+!data/chromosomes/chrom_sizes.txt
+
+# Keep the expected input directories present in a clone, but empty.
+!data/associations/
+data/associations/*
+!data/associations/.gitkeep
+
+!data/studies/
+data/studies/*
+!data/studies/.gitkeep
+
+!data/trait_ref/
+data/trait_ref/*
+!data/trait_ref/.gitkeep
+
+# ── Generated output ─────────────────────────────────────────────────────────
+results/*
+!results/.gitkeep
+
+figures/*
+!figures/.gitkeep
+
+logs/
+*.log

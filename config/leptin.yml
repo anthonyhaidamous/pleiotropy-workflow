@@ -1,0 +1,265 @@
+# =============================================================================
+# Phenotype configuration: leptin
+# Every pipeline stage reads from this file. To run for another phenotype,
+# copy this file (e.g. config/cll.yml) and edit the values below.
+# =============================================================================
+
+phenotype:
+  name: "leptin"
+  # MAPPED_TRAIT terms in the GWAS Catalog that define the phenotype of interest.
+  # Used in Stage 1 to identify lead SNPs and in Stage 5/7 to remove self-trait.
+  trait_terms:
+    - "leptin measurement"
+    - "BMI-adjusted leptin measurement"
+
+paths:
+  # Inputs (shared across phenotypes)
+  studies:       "data/studies/gwas-catalog-v1.0.3.1-studies-r2026-02-16.tsv"
+  associations:  "data/associations/gwas-catalog-download-associations-alt-full.tsv"
+  # Sébastien's curation (leptin_07_trait_table_reviewed_SH.txt) plus the
+  # explicit-exclusion columns added 2026-08 by
+  # analysis/patch_add_exclude_column.R. The _SH file is unchanged on disk and
+  # remains the provenance root; this is a derived, additive version.
+  # Records the reference used by the original leptin run. That file is NOT
+  # distributed with the repo (see README → Data), so on a fresh clone stage 7
+  # finds nothing here and flags every trait `new` for your own review — which
+  # is the intended first-run behaviour. Remove or set null for a new phenotype.
+  trait_ref:     "data/trait_ref/leptin/hopefully_last_version.txt"
+
+  # Output bases. The pipeline appends the phenotype slug automatically,
+  # so the actual locations end up as:
+  #   results/intermediate/leptin/
+  #   results/review/leptin/
+  #   figures/leptin/
+  # Run any other phenotype with the same project; its outputs land in
+  # parallel directories without colliding.
+  intermediate:  "results/intermediate"
+  review:        "results/review"
+  figures:       "figures"
+
+filters:
+  pvalue:           5.0e-8
+  ld_block_r2:      0.1     # SNPs kept in LD block construction (lead + proxies + correlated)
+  ld_proxy_r2:      0.9     # SNPs treated as proxies (pSNPs)
+  min_sample_size:  1000    # initial + replication, applied at cross-trait filtering
+
+ensembl:
+  build: "GRCh38"   # one of: GRCh38, GRCh37
+
+# -----------------------------------------------------------------------------
+# Ancestry encoding follows the cohort-proportion rule:
+#   - parse INITIAL SAMPLE SIZE and REPLICATION SAMPLE SIZE separately
+#   - if one superpop is >=90% of a field, that field emits just that superpop
+#   - otherwise, emit all superpops present in the field
+#   - union the two fields' results
+#
+# Descriptor -> superpop mapping is hardcoded in R/utils.r
+# (.ancestry_descriptor_map). Edit it there if you need to add or reassign
+# population descriptors.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Block merges — filled in AFTER Stage 4 produces its overlap report.
+# Each entry is a list of block names that should be merged into one.
+# Leave as [] on first run, then update and re-run Stage 4.
+# -----------------------------------------------------------------------------
+block_merges:
+  - ["B1", "B2"]
+  - ["B9", "B10"]
+
+# -----------------------------------------------------------------------------
+# GxE / multi-trait exclusion regex (Stage 6)
+# Defaults live in R/utils.r; override here if you need phenotype-specific tweaks.
+# Set use_defaults: true to use the built-in patterns unchanged.
+# -----------------------------------------------------------------------------
+gxe_exclusions:
+  use_defaults: true
+  # extra_patterns:       # optional list of additional regex to auto-exclude
+  #   - "\\bsome_pattern\\b"
+
+  # ---- Composite-ratio rule: explicit exceptions --------------------------
+  # Methods statement:
+  #   Ratios of two separately-ascertained biomarkers or anatomical
+  #   compartments were excluded; established composite anthropometric indices
+  #   treated as unitary phenotypes in the literature were retained.
+  #
+  # A ratio trait has ambiguous effect direction (a higher ratio can mean
+  # numerator up OR denominator down), which is why the `ratio` rule excludes
+  # them. The indices below are exceptions: the field treats them as single
+  # phenotypes with their own GWAS literature and a consistent directional
+  # interpretation, and both are directly relevant to leptin biology.
+  #
+  # Listed explicitly rather than carved out of the regex so the decision is
+  # visible and reviewable. Matched case-insensitively, whitespace-trimmed,
+  # against the whole of MAPPED_TRAIT or DISEASE/TRAIT.
+  #
+  # Deliberately NOT retained (imaging ratios of two separately measured
+  # compartments — exactly the ambiguity the rule targets):
+  #   visceral:abdominal adipose tissue ratio measurement
+  #   abdominal:gluteofemoral adipose tissue ratio measurement
+  #
+  # `body fat percentage` is here for the same reason: a bare "<X> percentage"
+  # with no named denominator is not a ratio of two separately-ascertained
+  # quantities, it is a standalone phenotype with a conventional direction. The
+  # percentage patterns require a named denominator so it never matches anyway;
+  # the entry documents the ruling. Leptin is secreted by adipose tissue in
+  # proportion to fat mass, so excluding it would be the most conspicuous
+  # omission in the paper. See .context/decisions.md C4.
+  # Matching is EXACT on the whole normalised string. Regional adiposity
+  # phenotypes are wanted but are LISTED, not swept in by a substring match:
+  # the old behaviour also pulled in "Body fat percentage variance", a vQTL
+  # rather than a mean effect. See .context/decisions.md D6.
+  #
+  # ABSI and Hip Index: the catalog labels these "BMI-adjusted waist/hip
+  # circumference", but the source studies (PMID 34021172) report "A body shape
+  # index" and "Hip index" -- published allometric indices in which the
+  # adjustment is constitutive of the phenotype definition, not an analysis
+  # choice applied to it. Retained under the same criterion as WHRadjBMI.
+  # "height-adjusted body mass index" is deliberately NOT here: its source is
+  # "Height adjusted BMI" (PMID 25044758), an ad hoc adjustment.
+  ratio_keep_list:
+    - "waist-hip ratio"
+    - "BMI-adjusted waist-hip ratio"
+    - "BMI-adjusted waist circumference"
+    - "BMI-adjusted hip circumference"
+    - "body fat percentage"
+    - "leg fat percentage left"
+    - "leg fat percentage right"
+    - "arm fat percentage left"
+    - "arm fat percentage right"
+
+  # ---- Composite-multitrait rule: explicit exceptions ---------------------
+  # is_composite_multitrait() fails closed: any comma that is not mechanically
+  # explained (numeric locant, chemical nomenclature, UniProt subcellular
+  # suffix, qualifier-only tail) makes a trait composite. That is correct for
+  # enumerations but over-reaches on APPOSITIONS, where the second fragment
+  # renames the first rather than adding a phenotype. Apposition cannot be told
+  # from enumeration by regex — the distinction is semantic — so the
+  # appositions are named here. See .context/decisions.md C6, C7.
+  multitrait_keep_list:
+    # one protein name (SCUBE1), not two phenotypes
+    - "signal peptide, CUB and EGF-like domain-containing protein 1 measurement"
+    # the CSF composition attribute IS the mannose measurement
+    - "cerebrospinal fluid composition attribute, mannose measurement"
+
+# -----------------------------------------------------------------------------
+# Self-trait exclusions (Stage 7)
+# Categories with these names will be removed before enrichment.
+# -----------------------------------------------------------------------------
+self_trait_categories:
+  - "Leptin"
+
+# =============================================================================
+# STRING module-detection stage group  (pipeline/string_pipeline/stage_string_*.R)
+#
+#   stage_string_00_download_bulk.R   fetch + checksum the version-pinned
+#                                     STRING bulk files (once per version)
+#   stage_string_01_fetch_edges.R     freeze the induced edge list for this
+#                                     phenotype's gene set
+#
+# The frozen edge file is the reproducibility anchor: every clustering run,
+# null permutation and reproducibility claim downstream hangs off that file
+# existing and never changing.
+# =============================================================================
+string:
+
+  # ---- Version pin. Recorded in provenance and in every output filename. ----
+  version:       "12.0"        # STRING release; "12.0" -> "v12-0" in filenames
+  species_taxon: 9606          # NCBI taxonomy id
+  network_type:  "functional"  # functional | physical
+
+  # ---- Dataset definition, NOT a display setting. ----
+  # No default exists in code: stage 01 aborts if this key is absent.
+  # 400 = 40% estimated probability that the association is real.
+  score_threshold: 400
+
+  # ---- Version-pinned bulk source (never the REST API: no rate limits, no
+  #      version drift, and the source file itself can be archived). ----
+  bulk:
+    dir: "data/string/bulk"
+    # Leave null to derive the version-stable host from the pin:
+    #   https://version-12-0.string-db.org/download
+    # That address is what string-db.org's own version API advertises, and it
+    # keeps serving v12.0 after the project ships v13. A host that tracks the
+    # current release would quietly break the pin.
+    source_url_base: null
+    # Tried in order if the primary host fails. Which host answered does not
+    # change the file (the manifest records each md5), and the manifest records
+    # which URL was used.
+    fallback_url_bases:
+      - "https://string-db.org/download"
+      # cert on this host expired 2026-07-29; kept last as a historical mirror
+      - "https://stringdb-downloads.org/download"
+    download_timeout: 3600     # seconds; the links file is ~250 MB
+    verify_live_version: true  # compare pin against the live release (warn only)
+    version_api: "https://string-db.org/api/json/version"
+
+  # ---- Input: protein-coding genes from the LD blocks (stage 10 output).
+  #      A bare filename resolves under results/intermediate/<slug>/. ----
+  input:
+    # Stage 10's SUBMISSION list, not its complete gene list. The two differ by
+    # the genes that are real and counted but are not valid STRING input —
+    # bare Ensembl IDs with no resolved symbol (1 in leptin, 8 in CLL). Those
+    # stay in genes_list_complete.txt and in the gene table, and are named in
+    # genes_excluded_from_string.tsv for the supplement.
+    gene_list: "genes_string_submission.txt"
+    # Stage 10's per-block gene table. Supplies each gene's LD block of origin,
+    # which becomes a vertex attribute and drives the block x module overlay.
+    # Set to null to build the graph without block annotation.
+    block_table: "protein_coding_genes_by_block.tsv"
+    block_gene_col:  "external_gene_name"
+    block_block_col: "Block"
+
+  # ---- Output ----
+  output:
+    edges_dir:    "data/string"      # frozen network bundle (note: data/ is gitignored)
+    stage_subdir: "string_modules"   # under results/intermediate/<slug>/
+
+  # ---- Reader tuning (memory, not analysis) ----
+  read:
+    chunk_size: 1000000        # rows per chunk when scanning the links file
+
+  # ---- Stage 02: which node set flows downstream ----
+  components:
+    downstream_node_set: "lcc"   # lcc | degree_ge1
+
+  # ---- Stage 03: module detection ----
+  # MCL is deterministic (no RNG), assumes no number of clusters, and partitions
+  # by density rather than by path. Uses van Dongen's reference implementation,
+  # not the CRAN MCL package.
+  mcl:
+    binary: "mcl"
+    inflation: 1.5        # matches the earlier manual run; stage 04 sweeps it
+    weight_scale: 1000    # combined_score / this -> edge weight in [0, 1]
+    extra_args: []
+
+  # ---- Positional-artifact rule, fixed in advance (method notes, H3) ----
+  # Any module with more than this fraction of members from a single LD block is
+  # reported as a positional artifact and excluded from downstream hypotheses.
+  # Set before looking at the numbers, on purpose.
+  modules:
+    max_single_block_fraction: 0.60
+
+  # ---- Stage 04: is the partition above an artifact of its two parameters? ----
+  # Stage 04 re-clusters the identical frozen graph across the grid and reports
+  # every stage-03 module's fate. It defines no dataset and overwrites nothing
+  # stage 03 owns, but the grid does define the coverage of the robustness
+  # claim, so it is declared here rather than defaulted in code.
+  stability:
+    # 1.2 is kept deliberately even though it collapses this graph to a single
+    # cluster: a degenerate endpoint is a result, and the stage names it and
+    # excludes it from the consensus rather than letting it lift every pair.
+    # Above ~4.0 the graph shatters into singletons. The reference inflation
+    # (mcl.inflation) is always swept whether or not it appears here.
+    inflation_grid: [1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0]
+    # Artifact thresholds to report each module's verdict at. 0.60 is the
+    # configured rule; the neighbours are here because M4 clears it at 57.1%,
+    # i.e. by one gene, and a threshold doing arbitrary work should be visible
+    # in the output rather than found by a reviewer.
+    artifact_fractions: [0.55, 0.60, 0.65]
+    # Consensus levels for the stable-core decomposition. Within a module, gene
+    # pairs co-clustered in at least this fraction of the informative grid runs
+    # are linked, and the connected components are its cores. Every level is
+    # reported, so the level's influence is visible rather than chosen.
+    core_consensus_levels: [0.5, 0.6, 0.7, 0.8]
+    sweep_subdir: "string_04_sweep"   # raw mcl output, one file per inflation
